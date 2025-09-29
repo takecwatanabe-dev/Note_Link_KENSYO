@@ -2,13 +2,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>NOTE LINK — v0.8S (RS6a)</title>
+<title>NOTE LINK — v0.8S (RS6a-HF1)</title>
 <!--
-RS6a: RS6の見た目は厳守。バグだけ修正。
-- ヘッダのスライド&影は維持
-- 端末別レイアウト: Touch=横幅フィット / PC=実寸寄り（DPR非依存に修正）
-- ▽ハンドル：折り畳み中に移動→展開で“その側（左/右）”にツールバーを出す（右ドック対応）。紙ワープなし。
-- UI並び・文言はRS6そのまま（背景/読み込み/保存/−/100%/＋/UNDO/REDO/印刷/PNG/共有/1/1）
+RS6a-HF1: RS6の見た目は厳守。内部のみ修正。
+- 左ドック開閉で紙が左右に動く問題を「アンカー保持」で補正
+- PC時は可能ならA4実寸、不足時のみフィット。Touchは横幅フィット据え置き
+- ヘッダーのスクロールバー（スライダー）を隠さない
 -->
 <style>
 :root{
@@ -37,11 +36,14 @@ header.topbar{
 .topbar .rail-scroll{
   position:relative; flex:1 1 auto; min-width:40px;
   overflow-x:auto; overflow-y:hidden; display:flex; align-items:center; gap:8px;
-  white-space:nowrap; -webkit-overflow-scrolling:touch; scrollbar-width:none;
+  white-space:nowrap; -webkit-overflow-scrolling:touch;
   cursor:grab; user-select:none; -webkit-user-select:none;
   touch-action: pan-x;
+  /* ★ スクロールバーを隠さない：scrollbar-width は既定(auto) */
 }
+/* ★ 以前の非表示指定は削除：
 .topbar .rail-scroll::-webkit-scrollbar{display:none}
+*/
 .topbar .rail-scroll.dragging{ cursor:grabbing }
 .topbar .right-fixed{flex:0 0 auto;display:flex;align-items:center;gap:8px}
 .topbar .btn{height:28px;padding:0 10px;border-radius:10px;background:#ffffff33;
@@ -219,7 +221,7 @@ body.tb-collapsed .tb-handle{ display:grid }
   <div class="row" id="rowPenExt">
     <label>ペン拡張</label>
     <label><input type="checkbox" id="uiPalm" checked> パーム除外</label>
-    <label><input type="checkbox" id="uiPressure" checked> 圧力</label>
+    <label><input type="checkbox" id="uiPressure" checked> 厚み（圧力）</label>
     <label><input type="checkbox" id="uiTilt" checked> 傾き</label>
   </div>
   <div class="row" id="rowTextOps" style="display:none;gap:6px">
@@ -262,9 +264,9 @@ function fitCanvases(){
   for(const c of [cvPaper,cvGuide,cv]){ c.width=Math.round(W*DPR); c.height=Math.round(H*DPR); c.style.width=W+'px'; c.style.height=H+'px'; }
   layoutPaper(); drawPaper(); redrawAll();
 }
-addEventListener('resize',()=>{applyBars(); fitCanvases(); clampHandle();});
-if (window.visualViewport){ visualViewport.addEventListener('resize', ()=>{ applyBars(); fitCanvases(); clampHandle(); }); }
-addEventListener('orientationchange', ()=>{ applyBars(); fitCanvases(); clampHandle(); });
+addEventListener('resize',()=>{applyBars(); fitCanvases(); clampHandle(); updateRailOverflow();});
+if (window.visualViewport){ visualViewport.addEventListener('resize', ()=>{ applyBars(); fitCanvases(); clampHandle(); updateRailOverflow(); }); }
+addEventListener('orientationchange', ()=>{ applyBars(); fitCanvases(); clampHandle(); updateRailOverflow(); });
 applyBars();
 
 /* ===== paper & grid ===== */
@@ -275,18 +277,17 @@ function layoutPaper(){
   const a4w=mm2csspx(A4.wmm), a4h=mm2csspx(A4.hmm);
   const vw=W, vh=H;
 
-  // PC：実寸寄り（RS6相当の 65%/90% ではなく、見た目を揃えるため比率は維持）
-  let scale=Math.min(vw*0.65/a4w, vh*0.9/a4h);
-  let w=a4w*scale, h=a4h*scale, x=(vw-w)/2, y=(vh-h)/2;
-
-  // Touch端末：横幅フィット（左右余白なし／高さは中央or上詰め）
-  if(isTouchDevice()){
-    const sW=vw/a4w;
-    w=a4w*sW; h=a4h*sW;
-    x=0;
-    y=(h<=vh)?(vh-h)/2:0;
+  // ★ PC：基本は実寸（1.0）。足りない場合のみフィット（余白なし基準）
+  if(!isTouchDevice()){
+    let scale=1;
+    if(a4w>vw || a4h>vh){ scale=Math.min(vw/a4w, vh/a4h); }
+    const w=a4w*scale, h=a4h*scale, x=(vw-w)/2, y=(vh-h)/2;
+    paperRect={x,y,w,h};
+  }else{
+    // ★ Touch端末：横幅フィット（既定挙動）
+    const sW=vw/a4w, w=a4w*sW, h=a4h*sW, x=0, y=(h<=vh)?(vh-h)/2:0;
+    paperRect={x,y,w,h};
   }
-  paperRect={x,y,w,h};
 }
 let gridOn=false, gridStepMM=10, gridColor='#b7bfd6';
 function drawPaper(){
@@ -458,7 +459,7 @@ $('#btnPrint').onclick=()=>window.print();
 $('#btnShare').onclick=()=>{composite().toBlob(async b=>{const f=new File([b],'note.png',{type:'image/png'});if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:'Note Link'})}catch(e){}}else{const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='note-link.png';a.click();setTimeout(()=>URL.revokeObjectURL(u),800)}})};
 
 let fileHandle=null;
-function exportJSON(){ flushText(); return JSON.stringify({ v:'RS6a',
+function exportJSON(){ flushText(); return JSON.stringify({ v:'RS6a-HF1',
   pages: Pages.list.map(pg=>({strokes:pg.strokes||[],textsHTML:pg.textsHTML||'', bg:pg.bg && pg.bg.dataURL ? {dataURL:pg.bg.dataURL}:null})),
   idx: Pages.idx, grid:{on:gridOn,stepMM:gridStepMM,color:gridColor} }); }
 async function doSave(){ const blob=new Blob([exportJSON()],{type:'application/json'});
@@ -522,8 +523,18 @@ function restoreSnap(s){
 $('#btnUndo').onclick=()=>{ if(!hist.length) return; const cur=snapshot(); const prev=hist.pop(); redoStack.push(cur); restoreSnap(prev); };
 $('#btnRedo').onclick=()=>{ const nxt=redoStack.pop(); if(!nxt) return; hist.push(snapshot()); restoreSnap(nxt); };
 
-/* ===== Header rail: wheel/drag scroll ===== */
+/* ===== Header rail: wheel/drag scroll + フェード制御 ===== */
 const rail = document.getElementById('railScroll');
+const railWrap = document.getElementById('railWrap');
+function updateRailOverflow(){
+  const can = rail.scrollWidth > rail.clientWidth + 1;
+  railWrap.classList.toggle('can-overflow', can);
+  railWrap.classList.toggle('at-start', rail.scrollLeft<=0);
+  railWrap.classList.toggle('at-end', Math.ceil(rail.scrollLeft+rail.clientWidth) >= rail.scrollWidth);
+}
+rail.addEventListener('scroll', updateRailOverflow);
+setTimeout(updateRailOverflow, 0);
+
 rail.addEventListener('wheel',(e)=>{ const useY=Math.abs(e.deltaY)>=Math.abs(e.deltaX); const d=useY?e.deltaY:e.deltaX;
   if(d!==0){ rail.scrollLeft+=d; e.preventDefault(); } },{passive:false});
 let railDown=false, railDrag=false, railStartX=0, railStartLeft=0, railPointerId=null;
@@ -566,30 +577,38 @@ function updateHandleIcon(){ const open=!isCollapsed(); tbHandle.innerHTML=open
 function applyHandleX(px){ const x=Math.max(4, Math.min(Math.max(4,innerWidth-40), px)); tbHandle.style.left=x+'px'; }
 function savedHandleX(side){ try{ const k='tbHandleX_'+(side|| (isRightDock()?'R':'L')); const v=localStorage.getItem(k); return (v==null? (side==='R'? innerWidth-44 : 8) : parseInt(v,10)||8); }catch{ return 8; } }
 function saveHandleX(px){ try{ const k='tbHandleX_'+(isRightDock()?'R':'L'); localStorage.setItem(k, String(px)); }catch{} }
-function getLeftW(){ return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-left'))||0; }
-function getRightW(){ return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-right'))||0; }
 function setDock(side){ if(side==='right'){ bodyEl.classList.add('tb-right'); document.documentElement.style.setProperty('--toolbar-left','0px'); document.documentElement.style.setProperty('--toolbar-right','56px'); }
   else { bodyEl.classList.remove('tb-right'); document.documentElement.style.setProperty('--toolbar-left','56px'); document.documentElement.style.setProperty('--toolbar-right','0px'); } }
 function handleCenterX(){ const x=parseInt(tbHandle.style.left||'8',10)||8; return x+18; } /* 36px幅の中心 */
 
+/* ★ アンカー保持で開閉時のズレをゼロにする */
 function toggleToolbar(mode='auto'){
-  const preLeft=getLeftW(), preRight=getRightW();
+  // 1) 画面上の「紙の中心」スクリーン座標を保存（ズレ防止のアンカー）
+  const anchorX = (paperRect.x + paperRect.w/2)*zoom + panX;
+  const anchorY = (paperRect.y + paperRect.h/2)*zoom + panY;
+
   const willCollapse=(mode==='auto')?!isCollapsed():(mode==='collapse');
 
+  // 展開時：ハンドル位置で左/右ドックを決定
   if(!willCollapse && isCollapsed()){
-    /* 展開：ハンドルの位置でドック側を決める */
     const side = (handleCenterX() > innerWidth/2) ? 'right' : 'left';
     setDock(side);
   }
+
+  // 折り畳み/展開
   if(willCollapse){ bodyEl.classList.add('tb-collapsed'); tbHandle.setAttribute('aria-expanded','false'); }
   else            { bodyEl.classList.remove('tb-collapsed'); tbHandle.setAttribute('aria-expanded','true'); }
 
-  const postLeft=getLeftW(), postRight=getRightW();
-  const delta=(preLeft+preRight) - (postLeft+postRight);
-  panX += delta; /* 紙の見かけ位置を維持 */
-  updateViewportTransform();
   updateHandleIcon();
-  applyBars(); fitCanvases();
+  // 2) レイアウト再計算
+  applyBars(); fitCanvases(); clampHandle();
+
+  // 3) 紙の中心が元の画面座標に戻るよう pan を補正
+  const nowX = (paperRect.x + paperRect.w/2)*zoom + panX;
+  const nowY = (paperRect.y + paperRect.h/2)*zoom + panY;
+  panX += (anchorX - nowX);
+  panY += (anchorY - nowY);
+  updateViewportTransform();
 }
 
 tbHandle.addEventListener('click', e=>{
@@ -642,6 +661,7 @@ function boot(){
   panel.classList.remove('show'); $$('.tool[data-tool="settings"]').forEach(b=>b.classList.remove('active'));
   updatePageIndicator();
   pushHistory();
+  updateRailOverflow();
 }
 boot();
 </script>
