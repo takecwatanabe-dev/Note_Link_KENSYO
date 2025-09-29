@@ -2,14 +2,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>NOTE LINK — v0.8.0 / B-REL6-Q</title>
+<title>NOTE LINK — v0.8.0 / B-REL6-R</title>
 <!--
-PATCH HEADER: 2025-09-28 10:02 JST / VERSION HF6Q
-CHANGES (from HF6P):
-  - Handle jump fix: drag threshold(8px) + justDragged flag to suppress post-drag click;
-    persist left(px) while dragging; single re-apply of saved X on toggle (no multi-rAF).
-  - No paper shift on toolbar collapse/expand: panX += (preToolbarW - postToolbarW).
-  - Settings panel visibility = legacy (HF6j): marker shows opacity, pen hides it; other rows unchanged.
+PATCH HEADER: 2025-09-29 09:48 JST / VERSION HF6R
+CHANGES (from HF6Q):
+  - Fix inPaperXY(): correct Y upper bound to `paperRect.y + paperRect.h`.
+  - Implement Keyboard tool (text boxes): add-on click, bold/italic, delete text / delete box,
+    PNG export composite, save/load & history, rehydrate events after load.
+  - textLayer pointer-events enabled only while tool='keyboard' to avoid accidental touches.
+  - Keep: header rail drag threshold & click-suppression; center-stable zoom; no paper shift on toolbar toggle.
+NOTE: UI is unchanged (no new visible controls).
 -->
 <style>
 :root{
@@ -113,7 +115,7 @@ body.tb-collapsed .tb-handle{ display:grid }
 .note-text{position:absolute;min-width:64px;min-height:28px;padding:6px 8px;color:#111;background:transparent;
   outline:1px dashed #ffffff40;border-radius:6px;pointer-events:auto;
   -webkit-user-select:text; user-select:text; caret-color:auto}
-.note-text[contenteditable="true"]:focus{outline:2px solid var(--ok)}
+.note-text[contenteditable="true"]:focus{outline:2px solid var(--ok); background: #ffffffa8}
 .note-text .del{position:absolute;right:-8px;top:-10px;font-size:11px;color:#fff;background:#0008;border:1px solid #fff3;border-radius:8px;padding:2px 6px;display:none}
 .note-text:focus-within .del{display:block}
 
@@ -128,7 +130,7 @@ body.tb-collapsed .tb-handle{ display:grid }
 </head>
 <body>
 <header class="topbar" id="topbar">
-  <div class="brand"><strong id="verText">NOTE LINK — V0.8.0 / B-REL6-Q</strong></div>
+  <div class="brand"><strong id="verText">NOTE LINK — V0.8.0 / B-REL6-R</strong></div>
 
   <div class="rail-wrap" id="railWrap">
     <div class="rail-scroll" id="railScroll">
@@ -153,7 +155,7 @@ body.tb-collapsed .tb-handle{ display:grid }
         <button class="btn" id="btnNext">次 ▶︎</button>
       </span>
 
-      <span class="build" id="buildText">BUILD: HF6Q</span>
+      <span class="build" id="buildText">BUILD: HF6R</span>
     </div>
     <div id="railHint" class="rail-hint" aria-hidden="true">⇠ スライド ⇢</div>
     <div class="rail-fade left"  aria-hidden="true"></div>
@@ -259,8 +261,8 @@ const cvPaper=$('#paper'), gPaper=cvPaper.getContext('2d');
 const cvGuide=$('#guide'), gGuide=cvGuide.getContext('2d');
 const cv=$('#paint'), ctx=cv.getContext('2d',{alpha:true});
 const textLayer=$('#textLayer');
-$('#verText').textContent='NOTE LINK — V0.8.0 / B-REL6-Q';
-$('#buildText').textContent='BUILD: HF6Q';
+$('#verText').textContent='NOTE LINK — V0.8.0 / B-REL6-R';
+$('#buildText').textContent='BUILD: HF6R';
 
 /* ===== layout & zoom ===== */
 let zoom=1, panX=0, panY=0, W=0, H=0;
@@ -298,7 +300,7 @@ function drawPaper(){
 
 /* ===== pages ===== */
 const Pages={ list:[{strokes:[],textsHTML:'',bg:null}], idx:0, cur(){ return this.list[this.idx]; } };
-function setPage(i){ i=Math.max(0, Math.min(Pages.list.length-1, i)); Pages.cur().textsHTML=textLayer.innerHTML; Pages.idx=i; textLayer.innerHTML=Pages.cur().textsHTML||''; updatePageIndicator(); drawPaper(); redrawAll(); }
+function setPage(i){ i=Math.max(0, Math.min(Pages.list.length-1, i)); Pages.cur().textsHTML=textLayer.innerHTML; Pages.idx=i; textLayer.innerHTML=Pages.cur().textsHTML||''; rehydrateTextLayer(); updatePageIndicator(); drawPaper(); redrawAll(); }
 function updatePageIndicator(){ $('#pageIndicator').textContent=(Pages.idx+1)+'/'+Pages.list.length; $('#pageIndicator_m').textContent=(Pages.idx+1)+'/'+Pages.list.length; }
 $('#btnPrev').onclick=()=>setPage(Pages.idx-1); $('#btnNext').onclick=()=>setPage(Pages.idx+1);
 $('#btnPrev_m').onclick=()=>{ setPage(Pages.idx-1); toggleMore(false); };
@@ -330,16 +332,17 @@ function setActiveTool(t){
   saveToolState(tool); tool=t; loadToolState(t);
   $$('.tool').forEach(b=>b.classList.toggle('active', b.dataset.tool===t));
   $('#panelTool').textContent=t;
-  /* ← HF6jと同じ表示条件へ */
+  /* 表示条件：HF6j 準拠 */
   $('#rowAlpha').style.display=(t==='marker')?'':'none';
   $('#rowLineCap').style.display=(t==='marker'||t==='pen')?'':'none';
   $('#rowStraight').style.display=(t==='pen'||t==='marker')?'':'none';
   $('#rowTextOps').style.display=(t==='keyboard')?'':'none';
   $('#rowSize').style.display=(t==='pen'||t==='marker'||t==='eraser')?'':'none';
   $('#rowPenExt').style.display=(t==='pen'||t==='marker')?'':'none';
-  syncUI(); cv.style.cursor=(t==='hand')?'grab':'crosshair';
+  textLayer.style.pointerEvents = (t==='keyboard') ? 'auto' : 'none';
+  syncUI(); cv.style.cursor=(t==='hand')?'grab':(t==='keyboard')?'text':'crosshair';
 }
-/* ツール群クリック（復帰済み） */
+/* ツール群クリック */
 $$('.tool').forEach(btn=>{
   if(btn.id==='btnSidebarToggle') return;
   btn.addEventListener('click', ()=>{
@@ -355,7 +358,7 @@ $$('.tool').forEach(btn=>{
 });
 $('#btnSidebarToggle').onclick=()=>toggleToolbar('auto');
 
-/* パネル移動（既存） */
+/* パネル移動 */
 (()=>{const handle=$('#panelHandle');let dragging=false,sx=0,sy=0,ox=0,oy=0,id=0;
 function down(e){ if(e.target.closest('#panelClose')) return; dragging=true; id=e.pointerId||1; try{panel.setPointerCapture(id)}catch{}; sx=e.clientX; sy=e.clientY; const r=panel.getBoundingClientRect(); ox=r.left; oy=r.top; e.preventDefault();}
 function move(e){ if(!dragging) return; const nx=ox+(e.clientX-sx),ny=oy+(e.clientY-sy); panel.style.left=Math.max(56,nx)+'px'; const top=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--topbar-h'))+6; panel.style.top=Math.max(top,ny)+'px';}
@@ -374,7 +377,7 @@ Object.values(ui).forEach(el=>el.addEventListener('input',onPanelChange));
 
 /* ===== pointer mapping & draw ===== */
 function pointerToCanvas(e){ const r=cv.getBoundingClientRect(); return { x:(e.clientX - r.left)*(cv.width/r.width), y:(e.clientY - r.top)*(cv.height/r.height) }; }
-function inPaperXY(x,y){ return x>=paperRect.x && y>=paperRect.y && x<=paperRect.x+paperRect.w && y<=paperRect.x+paperRect.w+paperRect.h; } // minor: original bug had y<=...h
+function inPaperXY(x,y){ return x>=paperRect.x && y>=paperRect.y && x<=paperRect.x+paperRect.w && y<=paperRect.y+paperRect.h; } /* ← HF6R: fix Y upper bound */
 let drawing=false, panning=false, start={x:0,y:0}, last={x:0,y:0}, activeTouches=0; let currentStroke=null;
 function setCtx(){ ctx.lineJoin='round'; ctx.lineCap=(tool==='marker'||tool==='pen')?cap:'round';
   if(tool==='eraser'){ ctx.globalCompositeOperation='destination-out'; ctx.strokeStyle='#000'; ctx.globalAlpha=1; }
@@ -392,6 +395,7 @@ function fromUV(u,v){ return {x:paperRect.x + u*paperRect.w, y:paperRect.y + v*p
 function onDown(e){
   if(e.pointerType==='touch') activeTouches++;
   if(tool==='hand'){ panning=true; cv.style.cursor='grabbing'; return; }
+  if(tool==='keyboard'){ return; }
   if($('#uiPalm').checked && e.pointerType==='touch' && activeTouches>1){ return; }
   const p=pointerToCanvas(e); if(!inPaperXY(p.x,p.y)) return;
   e.preventDefault(); try{cv.setPointerCapture(e.pointerId)}catch{}
@@ -401,6 +405,7 @@ function onDown(e){
 }
 function onMove(e){
   if(tool==='hand' && panning){ panX+=e.movementX||0; panY+=e.movementY||0; updateViewportTransform(); return; }
+  if(tool==='keyboard') return;
   if(!drawing) return;
   const p=pointerToCanvas(e);
   const straight=(straightKey||$('#uiStraight').checked);
@@ -413,6 +418,7 @@ function onMove(e){
 function onUp(e){
   if(e.pointerType==='touch') activeTouches=Math.max(0,activeTouches-1);
   if(tool==='hand' && panning){ panning=false; cv.style.cursor='grab'; return; }
+  if(tool==='keyboard') { clearGuide(); return; }
   if(!drawing){ clearGuide(); return; }
   const p=pointerToCanvas(e); const straight=(straightKey||$('#uiStraight').checked);
   if(straight){ setCtx(); ctx.beginPath(); ctx.moveTo(start.x,start.y); ctx.lineTo(p.x,p.y); ctx.stroke(); currentStroke.pts.push(toUV(p.x,p.y)); }
@@ -443,19 +449,97 @@ function redrawAll(){
   ctx.restore();
 }
 
+/* ===== TEXT (Keyboard tool) ===== */
+let activeText=null;
+function setActiveText(el){ if(activeText && activeText!==el) activeText.classList.remove('focus'); activeText=el; el?.focus(); }
+function layerPointFromClient(e){
+  const L=textLayer.getBoundingClientRect();
+  const x=(e.clientX-L.left), y=(e.clientY-L.top);
+  return {x,y};
+}
+function createTextBox(x,y,txt=''){
+  const box=document.createElement('div');
+  box.className='note-text'; box.contentEditable='true';
+  box.style.left=Math.max(paperRect.x/DPR, x-40)+'px';
+  box.style.top =Math.max(paperRect.y/DPR, y-14)+'px';
+  box.style.minWidth='64px';
+  box.innerText = txt||'';
+  const del=document.createElement('button'); del.textContent='削除'; del.className='del'; box.appendChild(del);
+  del.addEventListener('click',(ev)=>{ ev.stopPropagation(); box.remove(); pushHistoryDebounced(); });
+  box.addEventListener('pointerdown',(ev)=>{ ev.stopPropagation(); setActiveText(box); });
+  box.addEventListener('input', ()=>pushHistoryDebounced());
+  box.addEventListener('blur', ()=>pushHistoryDebounced());
+  textLayer.appendChild(box);
+  setActiveText(box);
+  return box;
+}
+textLayer.addEventListener('pointerdown',(e)=>{
+  if(tool!=='keyboard') return;
+  const p=layerPointFromClient(e);
+  // 既存枠をクリックしている場合は追加しない（capturingでboxが拾う）
+  if(e.target.classList.contains('note-text') || e.target.closest('.note-text')) return;
+  createTextBox(p.x, p.y, '');
+});
+$('#btnTextAdd').addEventListener('click',()=>{
+  const L=textLayer.getBoundingClientRect();
+  createTextBox(L.width/2, L.height/2, '');
+});
+$('#btnTextBold').addEventListener('click',()=>{
+  if(!activeText) return;
+  const cur=activeText.style.fontWeight;
+  activeText.style.fontWeight = (cur==='700' || cur==='bold')?'400':'700';
+  pushHistoryDebounced();
+});
+$('#btnTextIt').addEventListener('click',()=>{
+  if(!activeText) return;
+  activeText.style.fontStyle = (activeText.style.fontStyle==='italic')?'normal':'italic';
+  pushHistoryDebounced();
+});
+$('#btnTextDel').addEventListener('click',()=>{
+  if(!activeText) return;
+  const sel=window.getSelection();
+  if(sel && sel.rangeCount>0 && activeText.contains(sel.anchorNode)){
+    document.execCommand && document.execCommand('delete'); // 互換用
+    pushHistoryDebounced();
+  }else{
+    activeText.textContent=''; pushHistoryDebounced();
+  }
+});
+$('#btnTextBoxDel').addEventListener('click',()=>{
+  if(!activeText) return; activeText.remove(); activeText=null; pushHistoryDebounced();
+});
+function rehydrateTextLayer(){
+  textLayer.querySelectorAll('.note-text').forEach(box=>{
+    if(box._rehydrated) return;
+    box._rehydrated=true;
+    box.contentEditable='true';
+    const del=box.querySelector('.del')||(()=>{const b=document.createElement('button');b.textContent='削除';b.className='del';box.appendChild(b);return b;})();
+    del.addEventListener('click',(ev)=>{ ev.stopPropagation(); box.remove(); pushHistoryDebounced(); });
+    box.addEventListener('pointerdown',(ev)=>{ ev.stopPropagation(); setActiveText(box); });
+    box.addEventListener('input', ()=>pushHistoryDebounced());
+    box.addEventListener('blur', ()=>pushHistoryDebounced());
+  });
+}
+
 /* ===== output/save/load ===== */
 function composite(){ const out=document.createElement('canvas'); out.width=cv.width; out.height=cv.height; const o=out.getContext('2d');
   o.drawImage(cvPaper,0,0); o.drawImage(cv,0,0);
-  [...textLayer.querySelectorAll('.note-text')].forEach(n=>{ const r=n.getBoundingClientRect(), L=textLayer.getBoundingClientRect();
+  const L=textLayer.getBoundingClientRect();
+  [...textLayer.querySelectorAll('.note-text')].forEach(n=>{ const r=n.getBoundingClientRect();
     const x=((r.left-L.left)*(cv.width/(L.width||1))), y=((r.top-L.top)*(cv.height/(L.height||1)));
-    o.fillStyle='#111'; o.font=(16*DPR)+'px system-ui'; o.fillText(n.textContent.replace(/削除$/,''),x,y+16*DPR); });
+    const fs=Math.max(12, parseFloat(getComputedStyle(n).fontSize)||16)*DPR;
+    o.fillStyle='#111'; o.font= ( (getComputedStyle(n).fontStyle==='italic'?'italic ':'')
+      + (getComputedStyle(n).fontWeight||'400') + ' ' + fs + 'px system-ui' );
+    const text = n.textContent.replace(/削除$/,'');
+    o.fillText(text, x, y+fs);
+  });
   return out; }
 $('#btnPng').onclick=()=>composite().toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='note-link.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),800)});
 $('#btnPrint').onclick=()=>window.print();
 $('#btnShare').onclick=()=>{composite().toBlob(async b=>{const f=new File([b],'note.png',{type:'image/png'});if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:'Note Link'})}catch(e){}}else{const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='note-link.png';a.click();setTimeout(()=>URL.revokeObjectURL(u),800)}})};
 
 let fileHandle=null;
-function exportJSON(){ return JSON.stringify({ v:'HF6q',
+function exportJSON(){ return JSON.stringify({ v:'HF6r',
   pages: Pages.list.map(pg=>({strokes:pg.strokes||[],textsHTML:pg.textsHTML||'', bg:pg.bg && pg.bg.dataURL ? {dataURL:pg.bg.dataURL}:null})),
   idx: Pages.idx, grid:{on:gridOn,stepMM:gridStepMM,color:gridColor} }); }
 async function doSave(){ const blob=new Blob([exportJSON()],{type:'application/json'});
@@ -475,7 +559,7 @@ async function doLoad(){ try{
     if(!Pages.list.length) Pages.list=[{strokes:[],textsHTML:'',bg:null}];
     Pages.idx=Math.max(0,Math.min(Pages.list.length-1,data.idx||0));
     gridOn=!!data.grid?.on; gridStepMM=data.grid?.stepMM||10; gridColor=data.grid?.color||'#b7bfd6';
-    textLayer.innerHTML=Pages.cur().textsHTML||''; updatePageIndicator(); drawPaper(); redrawAll(); pushHistory();
+    textLayer.innerHTML=Pages.cur().textsHTML||''; rehydrateTextLayer(); updatePageIndicator(); drawPaper(); redrawAll(); pushHistory();
   }catch(e){} }
 $('#btnSave').onclick=doSave; $('#btnLoad').onclick=doLoad;
 
@@ -515,10 +599,12 @@ $('#btnImgInsert').onclick=()=>addImage('insert');
 const hist=[], redoStack=[];
 function snapshot(){ return {pages:JSON.parse(JSON.stringify(Pages.list.map(p=>({strokes:p.strokes,textsHTML:p.textsHTML,bg:p.bg?{dataURL:p.bg.dataURL}:null})))), idx:Pages.idx, grid:{on:gridOn,step:gridStepMM,color:gridColor}}; }
 function pushHistory(){ hist.push(snapshot()); if(hist.length>40) hist.shift(); redoStack.length=0; updatePageIndicator(); }
+let pushTimer=0;
+function pushHistoryDebounced(){ clearTimeout(pushTimer); pushTimer=setTimeout(pushHistory, 250); }
 function restoreSnap(s){
   Pages.list=s.pages.map(pg=>{ const entry={strokes:pg.strokes||[],textsHTML:pg.textsHTML||'',bg:null}; if(pg.bg&&pg.bg.dataURL){ const img=new Image(); img.src=pg.bg.dataURL; entry.bg={dataURL:pg.bg.dataURL,img}; } return entry; });
   Pages.idx=Math.max(0,Math.min(Pages.list.length-1,s.idx||0)); gridOn=s.grid.on; gridStepMM=s.grid.step; gridColor=s.grid.color;
-  textLayer.innerHTML=Pages.cur().textsHTML||''; updatePageIndicator(); drawPaper(); redrawAll();
+  textLayer.innerHTML=Pages.cur().textsHTML||''; rehydrateTextLayer(); updatePageIndicator(); drawPaper(); redrawAll();
 }
 $('#btnUndo').onclick=()=>{ if(!hist.length) return; const cur=snapshot(); const prev=hist.pop(); redoStack.push(cur); restoreSnap(prev); };
 $('#btnRedo').onclick=()=>{ const nxt=redoStack.pop(); if(!nxt) return; hist.push(snapshot()); restoreSnap(nxt); };
@@ -567,7 +653,7 @@ rail.addEventListener('pointerleave',railEnd,{passive:true});
   update(); maybe();
 })();
 
-/* ===== Collapsible toolbar + movable handle (HF6Q) ===== */
+/* ===== Collapsible toolbar + movable handle ===== */
 const bodyEl=document.body, tbHandle=document.getElementById('tbHandle');
 function updateHandleIcon(){ const open=!isCollapsed(); tbHandle.innerHTML=open
   ? '<svg viewBox="0 0 24 24"><path d="M5 15 L12 8 L19 15 Z"/></svg>'  /* ▲ */
@@ -582,23 +668,22 @@ function getToolbarW(){
   const v=b||r||'0'; return parseInt(v,10)||0;
 }
 function toggleToolbar(mode='auto'){
-  const preW = getToolbarW();                 /* 開閉前のバー幅(px) */
+  const preW = getToolbarW();
   const willCollapse=(mode==='auto')?!isCollapsed():(mode==='collapse');
   if(willCollapse){ bodyEl.classList.add('tb-collapsed'); tbHandle.setAttribute('aria-expanded','false'); }
   else            { bodyEl.classList.remove('tb-collapsed'); tbHandle.setAttribute('aria-expanded','true'); }
-  const postW = getToolbarW();                /* 開閉後のバー幅(px) */
-  const delta = preW - postW;                 /* 左余白の減少分だけ panX を加算 */
-  panX += delta;                              /* 画面上の紙位置を保持 */
+  const postW = getToolbarW();
+  const delta = preW - postW;
+  panX += delta;
   updateViewportTransform();
   updateHandleIcon();
-  /* ハンドルは保存値を1回だけ再適用（多重rAFは不要） */
   applyHandleX(savedHandleX());
   applyBars(); fitCanvases();
 }
 
 /* ハンドル：ドラッグ/TAP判定＋ドラッグ直後のclick抑止 */
 tbHandle.addEventListener('click', e=>{
-  if(justDragged){ justDragged=false; return; }  /* ドラッグ直後の誤クリック無視 */
+  if(justDragged){ justDragged=false; return; }
   toggleToolbar('auto');
 });
 function clamp(n,min,max){ return Math.max(min,Math.min(max,n)); }
@@ -633,6 +718,7 @@ function boot(){
   updateViewportTransform(); fitCanvases(); setActiveTool('pen');
   updateHandleIcon(); applyHandleX(savedHandleX());
   panel.classList.remove('show'); $$('.tool[data-tool="settings"]').forEach(b=>b.classList.remove('active'));
+  rehydrateTextLayer();
   pushHistory();
 }
 boot();
