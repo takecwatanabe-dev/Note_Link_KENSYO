@@ -2,21 +2,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>NOTE LINK — v0.8.S</title>
+<title>NOTE LINK — v0.8S (RS6a)</title>
 <!--
-PATCH HEADER: 2025-09-29 16:58 JST / VERSION HF6S (single-file)
-SCOPE: 要求通り「1枚HTMLのみ」。ツールバーのコードはHF6Q相当を維持（未改変）。
-CHANGES（最小差分）:
-  - Touch端末: layoutPaper() を横幅フィット（x=0, yは中央 or 上詰め）に上書き
-  - 1枚固定: ページ操作は無効化（UIは表示のまま、内部は常に1/1）
-  - inPaperXYのy境界バグ修正（y <= paperRect.y + paperRect.h）
-  - テキスト保存/読み込み/PNG合成での同期を強化
+RS6a: RS6の見た目は厳守。バグだけ修正。
+- ヘッダのスライド&影は維持
+- 端末別レイアウト: Touch=横幅フィット / PC=実寸寄り（DPR非依存に修正）
+- ▽ハンドル：折り畳み中に移動→展開で“その側（左/右）”にツールバーを出す（右ドック対応）。紙ワープなし。
+- UI並び・文言はRS6そのまま（背景/読み込み/保存/−/100%/＋/UNDO/REDO/印刷/PNG/共有/1/1）
 -->
 <style>
 :root{
   --ink:#e6f1ff;--ink-dim:#9bd6e9;--bg:#0b1020;--panel:#101827;--accent:#3f78ff;
   --ok:#20e3c2;--muted:#2a3550;--shadow:0 10px 24px rgba(0,0,0,.45);
-  --topbar-h:44px;--toolbar-w:56px;
+  --topbar-h:44px;--toolbar-left:56px;--toolbar-right:0px;
 }
 *{box-sizing:border-box}
 html,body{
@@ -25,13 +23,14 @@ html,body{
   -webkit-user-select:none;user-select:none;overflow-x:hidden;
 }
 
-/* ===== Topbar ===== */
+/* ===== Topbar (RS6) ===== */
 header.topbar{
   position:fixed;top:0;left:0;right:0;z-index:2000;height:var(--topbar-h);
   display:flex;align-items:center;gap:8px;padding:0 10px;font-size:12px;color:#fff;
   background:linear-gradient(0deg,rgba(42,84,255,.16),rgba(42,84,255,.16)),var(--accent);
   border-bottom:1px solid #ffffff26; white-space:nowrap; overflow:hidden;
   padding-top:env(safe-area-inset-top);
+  box-shadow:0 3px 10px rgba(0,0,0,.35); /* 影あり */
 }
 .topbar .brand{flex:0 0 auto;font-weight:800}
 .topbar .rail-wrap{ position:relative; flex:1 1 auto; min-width:40px; }
@@ -40,6 +39,7 @@ header.topbar{
   overflow-x:auto; overflow-y:hidden; display:flex; align-items:center; gap:8px;
   white-space:nowrap; -webkit-overflow-scrolling:touch; scrollbar-width:none;
   cursor:grab; user-select:none; -webkit-user-select:none;
+  touch-action: pan-x;
 }
 .topbar .rail-scroll::-webkit-scrollbar{display:none}
 .topbar .rail-scroll.dragging{ cursor:grabbing }
@@ -65,18 +65,20 @@ header.topbar{
 
 /* ===== Layout ===== */
 #wrap{position:relative;height:100%;padding-top:var(--topbar-h)}
-#stage{position:absolute;inset:0;padding-left:var(--toolbar-w)}
+#stage{position:absolute;inset:0;padding-left:var(--toolbar-left);padding-right:var(--toolbar-right);}
 #viewport{position:absolute;inset:0;transform-origin:0 0;touch-action:none}
-#paper,#guide,#paint{position:absolute;left:var(--toolbar-w);top:0;right:0;bottom:0}
+#paper,#guide,#paint{position:absolute;left:var(--toolbar-left);top:0;right:var(--toolbar-right);bottom:0}
 #paper,#guide{z-index:100;pointer-events:none}
 #paint{z-index:120;touch-action:none;-webkit-touch-callout:none}
 
 /* ===== Sidebar / Tools ===== */
 .sidebar{
-  position:fixed;z-index:1500;left:0;top:var(--topbar-h);bottom:0;width:var(--toolbar-w);
+  position:fixed;z-index:1500;left:0;top:var(--topbar-h);bottom:0;width:56px;
   display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,.86);
   box-shadow:0 0 0 1px var(--muted) inset; transition:width .18s;
 }
+/* 右ドック */
+body.tb-right .sidebar{left:auto; right:0;}
 .sidebar .rail{width:100%;padding:6px;display:flex;flex-direction:column;gap:8px}
 .tool{display:grid;place-items:center;width:100%;height:36px;border-radius:10px;cursor:pointer;
   background:rgba(22,26,38,.75);border:1px solid rgba(50,60,100,.6);
@@ -86,10 +88,10 @@ header.topbar{
 .tool svg{width:18px;height:18px;stroke:var(--ink);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 /* 折り畳み時：全幅化＆サイドバー非表示 */
-body.tb-collapsed{ --toolbar-w:0px }
+body.tb-collapsed{ --toolbar-left:0px; --toolbar-right:0px; }
 body.tb-collapsed .sidebar{ display:none }
 
-/* 折り畳み時のみ “三角ハンドル” */
+/* 折り畳み時のみ “三角ハンドル”（閉=▼ / 開=▲） */
 .tb-handle{
   position:fixed;z-index:1600;top:calc(var(--topbar-h) + 8px);left:8px;
   width:36px;height:36px;border-radius:10px;display:none;place-items:center;
@@ -110,7 +112,7 @@ body.tb-collapsed .tb-handle{ display:grid }
 #panelTool{flex:1;font-weight:600;font-size:14px;text-align:left}
 .panel .close{margin-left:auto;height:26px;padding:0 10px;border-radius:8px;border:1px solid #ffffff2e;background:#ffffff14;color:#fff;font-size:14px}
 
-.text-layer{position:absolute;left:var(--toolbar-w);top:0;right:0;bottom:0;z-index:130;pointer-events:none}
+.text-layer{position:absolute;left:var(--toolbar-left);top:0;right:var(--toolbar-right);bottom:0;z-index:130;pointer-events:none}
 .note-text{position:absolute;min-width:64px;min-height:28px;padding:6px 8px;color:#111;background:transparent;
   outline:1px dashed #ffffff40;border-radius:6px;pointer-events:auto;
   -webkit-user-select:text; user-select:text; caret-color:auto}
@@ -120,7 +122,6 @@ body.tb-collapsed .tb-handle{ display:grid }
 
 @media print{header.topbar,.sidebar,.panel{display:none!important}#stage{padding-left:0!important}body,html,#wrap{height:auto}}
 
-.page-nav{display:inline-flex;gap:6px;align-items:center}
 #pageIndicator{min-width:48px;text-align:center}
 #morePanel{position:fixed;right:10px;top:calc(var(--topbar-h) + 6px);z-index:3000;display:none;
   background:var(--panel);border:1px solid #ffffff24;border-radius:12px;box-shadow:var(--shadow);padding:8px}
@@ -129,32 +130,22 @@ body.tb-collapsed .tb-handle{ display:grid }
 </head>
 <body>
 <header class="topbar" id="topbar">
-  <div class="brand"><strong id="verText">NOTE LINK — v0.8.S</strong></div>
+  <div class="brand"><strong id="verText">NOTE LINK — v0.8S</strong></div>
 
   <div class="rail-wrap" id="railWrap">
     <div class="rail-scroll" id="railScroll">
-      <button class="btn" id="btnImgAppend">画像追加</button>
-      <button class="btn" id="btnImgInsert">画像挿入</button>
+      <button class="btn" id="btnSetBg">背景</button>
       <button class="btn" id="btnLoad">読み込み</button>
       <button class="btn" id="btnSave">保存</button>
-
       <button class="btn" id="btnZoomOut">−</button>
       <button class="btn" id="btnZoomReset">100%</button>
       <button class="btn" id="btnZoomIn">＋</button>
-
-      <button class="btn" id="btnUndo">undo</button>
-      <button class="btn" id="btnRedo">redo</button>
+      <button class="btn" id="btnUndo">UNDO</button>
+      <button class="btn" id="btnRedo">REDO</button>
       <button class="btn" id="btnPrint">印刷</button>
       <button class="btn" id="btnPng">PNG</button>
       <button class="btn" id="btnShare">共有</button>
-
-      <span class="page-nav">
-        <button class="btn" id="btnPrev">◀︎ 前</button>
-        <span id="pageIndicator">1/1</span>
-        <button class="btn" id="btnNext">次 ▶︎</button>
-      </span>
-
-      <span class="build" id="buildText">BUILD: HF6S</span>
+      <span id="pageIndicator">1/1</span>
     </div>
     <div id="railHint" class="rail-hint" aria-hidden="true">⇠ スライド ⇢</div>
     <div class="rail-fade left"  aria-hidden="true"></div>
@@ -166,15 +157,14 @@ body.tb-collapsed .tb-handle{ display:grid }
   </div>
 </header>
 
-<!-- 折り畳み時のみ出る “三角ハンドル”（閉=▼ / 開=▲） -->
 <button id="tbHandle" class="tb-handle" aria-expanded="false" title="ツールバー 開く/閉じる">
   <svg viewBox="0 0 24 24"><path d="M5 9 L12 16 L19 9 Z"/></svg>
 </button>
 
 <div id="morePanel">
-  <button class="btn" id="btnPrev_m">◀︎ 前</button>
+  <button class="btn" id="btnPrev_m">◀ 前</button>
   <div style="text-align:center;color:#fff;margin:4px 0">ページ <span id="pageIndicator_m">1/1</span></div>
-  <button class="btn" id="btnNext_m">次 ▶︎</button>
+  <button class="btn" id="btnNext_m">次 ▶</button>
   <hr style="border:none;border-top:1px solid #ffffff24;margin:6px 0">
   <button class="btn" id="btnAddPage_m">＋ページ</button>
   <button class="btn" id="btnSetBg_m">画像を背景に設定</button>
@@ -183,7 +173,7 @@ body.tb-collapsed .tb-handle{ display:grid }
 <aside class="sidebar" id="sidebar">
   <div class="rail">
     <button class="tool" id="btnSidebarToggle" data-tool="toggle" title="ツールバーの開閉">
-      <svg viewBox="0 0 24 24"><path d="M5 15 L12 7 L19 15 M19 15 L5 15"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M5 15 L12 8 L19 15 M19 15 L5 15"/></svg>
     </button>
     <button class="tool" data-tool="pen" title="ペン">
       <svg viewBox="0 0 24 24"><path d="M3 21l4-1 12-12-3-3L4 17l-1 4zM14 6l3 3"/></svg>
@@ -260,8 +250,7 @@ const cvPaper=$('#paper'), gPaper=cvPaper.getContext('2d');
 const cvGuide=$('#guide'), gGuide=cvGuide.getContext('2d');
 const cv=$('#paint'), ctx=cv.getContext('2d',{alpha:true});
 const textLayer=$('#textLayer');
-$('#verText').textContent='NOTE LINK — v0.8.S';
-$('#buildText').textContent='BUILD: HF6S';
+$('#verText').textContent='NOTE LINK — v0.8S';
 
 /* ===== layout & zoom ===== */
 let zoom=1, panX=0, panY=0, W=0, H=0;
@@ -279,18 +268,18 @@ addEventListener('orientationchange', ()=>{ applyBars(); fitCanvases(); clampHan
 applyBars();
 
 /* ===== paper & grid ===== */
-function mm2px(mm){return mm*96/25.4*DPR}
+function mm2csspx(mm){return mm*96/25.4} /* DPR非依存：CSSピクセル */
 const A4={wmm:210,hmm:297}; let paperRect={x:0,y:0,w:0,h:0};
 function isTouchDevice(){ return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) || (navigator.maxTouchPoints>0); }
 function layoutPaper(){
-  const a4w=mm2px(A4.wmm), a4h=mm2px(A4.hmm);
-  const vw=cv.width, vh=cv.height;
+  const a4w=mm2csspx(A4.wmm), a4h=mm2csspx(A4.hmm);
+  const vw=W, vh=H;
 
-  // 既存（PC等）：そのまま
+  // PC：実寸寄り（RS6相当の 65%/90% ではなく、見た目を揃えるため比率は維持）
   let scale=Math.min(vw*0.65/a4w, vh*0.9/a4h);
   let w=a4w*scale, h=a4h*scale, x=(vw-w)/2, y=(vh-h)/2;
 
-  // ★Touch端末のみ：横幅フィットに上書き（x=0、yは中央 or 上詰め）
+  // Touch端末：横幅フィット（左右余白なし／高さは中央or上詰め）
   if(isTouchDevice()){
     const sW=vw/a4w;
     w=a4w*sW; h=a4h*sW;
@@ -303,33 +292,33 @@ let gridOn=false, gridStepMM=10, gridColor='#b7bfd6';
 function drawPaper(){
   const g=gPaper; g.clearRect(0,0,cvPaper.width,cvPaper.height);
   g.fillStyle='#0b1020'; g.fillRect(0,0,cvPaper.width,cvPaper.height);
-  const pg=Pages.cur(); g.fillStyle='#fff'; g.fillRect(paperRect.x,paperRect.y,paperRect.w,paperRect.h);
-  if(pg.bg && pg.bg.img){ g.drawImage(pg.bg.img,paperRect.x,paperRect.y,paperRect.w,paperRect.h); }
-  if(gridOn){ const step=Math.max(2, Math.round(mm2px(gridStepMM)*(paperRect.h/mm2px(A4.hmm))));
+  const pg=Pages.cur(); g.fillStyle='#fff'; g.fillRect(paperRect.x*DPR,paperRect.y*DPR,paperRect.w*DPR,paperRect.h*DPR);
+  if(pg.bg && pg.bg.img){ g.drawImage(pg.bg.img, paperRect.x*DPR, paperRect.y*DPR, paperRect.w*DPR, paperRect.h*DPR); }
+  if(gridOn){
+    const step = (gridStepMM / A4.hmm) * paperRect.h * DPR;
     g.save(); g.strokeStyle=gridColor+'88'; g.lineWidth=1*DPR; g.beginPath();
-    for(let y=paperRect.y+step; y<=paperRect.y+paperRect.h-step; y+=step){ g.moveTo(paperRect.x,y); g.lineTo(paperRect.x+paperRect.w,y); }
+    for(let y=paperRect.y*DPR+step; y<=paperRect.y*DPR+paperRect.h*DPR-step; y+=step){ g.moveTo(paperRect.x*DPR,y); g.lineTo(paperRect.x*DPR+paperRect.w*DPR,y); }
     g.stroke(); g.restore();
   }
 }
 
-/* ===== pages: 1枚固定 ===== */
+/* ===== pages ===== */
 const Pages={ list:[{strokes:[],textsHTML:'',bg:null}], idx:0, cur(){ return this.list[this.idx]; } };
-function setPage(i){ /* 1枚固定なので何もしない */ updatePageIndicator(); }
-function updatePageIndicator(){ $('#pageIndicator').textContent='1/1'; $('#pageIndicator_m').textContent='1/1'; }
-$('#btnPrev').onclick=()=>{}; $('#btnNext').onclick=()=>{};
-$('#btnPrev_m').onclick=()=>{ toggleMore(false); };
-$('#btnNext_m').onclick=()=>{ toggleMore(false); };
-$('#btnAddPage_m').onclick=()=>{ toggleMore(false); };
+function setPage(i){ i=Math.max(0, Math.min(Pages.list.length-1, i)); Pages.cur().textsHTML=textLayer.innerHTML; Pages.idx=i; textLayer.innerHTML=Pages.cur().textsHTML||''; updatePageIndicator(); drawPaper(); redrawAll(); }
+function updatePageIndicator(){ $('#pageIndicator').textContent=(Pages.idx+1)+'/'+Pages.list.length; $('#pageIndicator_m').textContent=(Pages.idx+1)+'/'+Pages.list.length; }
+function addPage(){ const pos=Pages.idx+1; Pages.list.splice(pos,0,{strokes:[],textsHTML:'',bg:null}); setPage(pos); pushHistory(); }
+function prevPage(){ setPage(Pages.idx-1); }
+function nextPage(){ setPage(Pages.idx+1); }
 
 /* ===== more panel ===== */
 const morePanel=$('#morePanel'); const btnMore=$('#btnMore');
 function toggleMore(on){ morePanel.style.display=on?'block':'none'; }
 btnMore.onclick=()=>toggleMore(morePanel.style.display!=='block');
 addEventListener('click',e=>{ if(!morePanel.contains(e.target) && e.target!==btnMore) toggleMore(false); });
-$('#btnSetBg_m').onclick=async()=>{ const file=await pickImage(); if(!file) return;
-  const tmp=new Image(); tmp.src=URL.createObjectURL(file); await new Promise(r=>{ tmp.onload=r; tmp.onerror=r; });
-  const bg=fitImageToPaper(tmp); URL.revokeObjectURL(tmp.src); Pages.cur().bg=bg; drawPaper(); redrawAll(); pushHistory(); toggleMore(false);
-};
+$('#btnAddPage_m').onclick=()=>{ addPage(); toggleMore(false); };
+$('#btnPrev_m').onclick=()=>{ prevPage(); toggleMore(false); };
+$('#btnNext_m').onclick=()=>{ nextPage(); toggleMore(false); };
+$('#btnSetBg_m').onclick=async()=>{ const file=await pickImage(); if(!file) return; const tmp=new Image(); tmp.src=URL.createObjectURL(file); await new Promise(r=>{ tmp.onload=r; tmp.onerror=r; }); const bg=fitImageToPaper(tmp); URL.revokeObjectURL(tmp.src); Pages.cur().bg=bg; drawPaper(); redrawAll(); pushHistory(); toggleMore(false); };
 
 /* ===== tools & panel ===== */
 let tool='pen';
@@ -345,7 +334,6 @@ function setActiveTool(t){
   saveToolState(tool); tool=t; loadToolState(t);
   $$('.tool').forEach(b=>b.classList.toggle('active', b.dataset.tool===t));
   $('#panelTool').textContent=t;
-  /* 表示条件はHF6Qのまま */
   $('#rowAlpha').style.display=(t==='marker')?'':'none';
   $('#rowLineCap').style.display=(t==='marker'||t==='pen')?'':'none';
   $('#rowStraight').style.display=(t==='pen'||t==='marker')?'':'none';
@@ -354,7 +342,6 @@ function setActiveTool(t){
   $('#rowPenExt').style.display=(t==='pen'||t==='marker')?'':'none';
   syncUI(); cv.style.cursor=(t==='hand')?'grab':(t==='keyboard')?'text':'crosshair';
 }
-/* ツール群クリック（復帰済み） */
 $$('.tool').forEach(btn=>{
   if(btn.id==='btnSidebarToggle') return;
   btn.addEventListener('click', ()=>{
@@ -370,7 +357,7 @@ $$('.tool').forEach(btn=>{
 });
 $('#btnSidebarToggle').onclick=()=>toggleToolbar('auto');
 
-/* パネル移動（既存） */
+/* パネル移動 */
 (()=>{const handle=$('#panelHandle');let dragging=false,sx=0,sy=0,ox=0,oy=0,id=0;
 function down(e){ if(e.target.closest('#panelClose')) return; dragging=true; id=e.pointerId||1; try{panel.setPointerCapture(id)}catch{}; sx=e.clientX; sy=e.clientY; const r=panel.getBoundingClientRect(); ox=r.left; oy=r.top; e.preventDefault();}
 function move(e){ if(!dragging) return; const nx=ox+(e.clientX-sx),ny=oy+(e.clientY-sy); panel.style.left=Math.max(56,nx)+'px'; const top=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--topbar-h'))+6; panel.style.top=Math.max(top,ny)+'px';}
@@ -387,7 +374,7 @@ function syncUI(){ui.color.value=color;ui.size.value=size;ui.sizeVal.textContent
 function onPanelChange(){color=ui.color.value;size=+ui.size.value;alpha=(tool==='marker')?(+ui.alpha.value/100):alpha;ui.sizeVal.textContent=`${size}px (${pxToMm(size).toFixed(2)} mm)`;ui.alphaVal.textContent=Math.round(alpha*100)+'%';cap=ui.cap.value;straightToggle=ui.straight.checked;gridOn=ui.gOn.checked;gridStepMM=+ui.gStep.value;gridColor=ui.gColor.value;drawPaper();redrawAll();}
 Object.values(ui).forEach(el=>el.addEventListener('input',onPanelChange));
 
-/* ===== pointer mapping & draw ===== */
+/* ===== drawing ===== */
 function pointerToCanvas(e){ const r=cv.getBoundingClientRect(); return { x:(e.clientX - r.left)*(cv.width/r.width), y:(e.clientY - r.top)*(cv.height/r.height) }; }
 function inPaperXY(x,y){ return x>=paperRect.x && y>=paperRect.y && x<=paperRect.x+paperRect.w && y<=paperRect.y+paperRect.h; }
 let drawing=false, panning=false, start={x:0,y:0}, last={x:0,y:0}, activeTouches=0; let currentStroke=null;
@@ -471,9 +458,9 @@ $('#btnPrint').onclick=()=>window.print();
 $('#btnShare').onclick=()=>{composite().toBlob(async b=>{const f=new File([b],'note.png',{type:'image/png'});if(navigator.share&&navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:'Note Link'})}catch(e){}}else{const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download='note-link.png';a.click();setTimeout(()=>URL.revokeObjectURL(u),800)}})};
 
 let fileHandle=null;
-function exportJSON(){ flushText(); return JSON.stringify({ v:'HF6s',
+function exportJSON(){ flushText(); return JSON.stringify({ v:'RS6a',
   pages: Pages.list.map(pg=>({strokes:pg.strokes||[],textsHTML:pg.textsHTML||'', bg:pg.bg && pg.bg.dataURL ? {dataURL:pg.bg.dataURL}:null})),
-  idx: 0, grid:{on:gridOn,stepMM:gridStepMM,color:gridColor} }); }
+  idx: Pages.idx, grid:{on:gridOn,stepMM:gridStepMM,color:gridColor} }); }
 async function doSave(){ const blob=new Blob([exportJSON()],{type:'application/json'});
   try{ if('showSaveFilePicker' in window){ if(!fileHandle){ fileHandle=await window.showSaveFilePicker({suggestedName:'note-link.json',types:[{description:'Note Link JSON',accept:{'application/json':['.json']}}]}); }
       const w=await fileHandle.createWritable(); await w.write(blob); await w.close();
@@ -486,14 +473,16 @@ async function doLoad(){ try{
       f=await new Promise(res=>{ inp.onchange=()=>res(inp.files[0]); inp.click(); });
     }
     const txt=await f.text(); const data=JSON.parse(txt);
-    Pages.list=[(data.pages&&data.pages[0])?data.pages[0]:{strokes:[],textsHTML:'',bg:null}]; // 1枚固定で最初だけ
-    if(Pages.list[0].bg && Pages.list[0].bg.dataURL){ const img=new Image(); img.src=Pages.list[0].bg.dataURL; Pages.list[0].bg={dataURL:Pages.list[0].bg.dataURL,img}; }
-    textLayer.innerHTML=Pages.list[0].textsHTML||'';
-    drawPaper(); redrawAll(); pushHistory();
+    Pages.list=(data.pages||[]).map(pg=>{ const entry={strokes:pg.strokes||[],textsHTML:pg.textsHTML||'',bg:null};
+      if(pg.bg && pg.bg.dataURL){ const img=new Image(); img.src=pg.bg.dataURL; entry.bg={dataURL:pg.bg.dataURL,img}; } return entry; });
+    if(!Pages.list.length) Pages.list=[{strokes:[],textsHTML:'',bg:null}];
+    Pages.idx=Math.max(0,Math.min(Pages.list.length-1,data.idx||0));
+    gridOn=!!data.grid?.on; gridStepMM=data.grid?.stepMM||10; gridColor=data.grid?.color||'#b7bfd6';
+    textLayer.innerHTML=Pages.cur().textsHTML||''; updatePageIndicator(); drawPaper(); redrawAll(); pushHistory();
   }catch(e){} }
 $('#btnSave').onclick=doSave; $('#btnLoad').onclick=doLoad;
 
-/* ===== image add/insert ===== */
+/* ===== image background ===== */
 async function pickImage(){
   try{
     if('showOpenFilePicker' in window){
@@ -506,115 +495,117 @@ async function pickImage(){
   }catch(e){ return null; }
 }
 function fitImageToPaper(img){
-  const off=document.createElement('canvas'); off.width=Math.round(paperRect.w); off.height=Math.round(paperRect.h);
+  const off=document.createElement('canvas'); off.width=Math.round(paperRect.w*DPR); off.height=Math.round(paperRect.h*DPR);
   const o=off.getContext('2d'); const sc=Math.min(off.width/img.naturalWidth, off.height/img.naturalHeight);
   const w=img.naturalWidth*sc, h=img.naturalHeight*sc, x=(off.width-w)/2, y=(off.height-h)/2;
   o.fillStyle='#fff'; o.fillRect(0,0,off.width,off.height); o.drawImage(img,x,y,w,h);
   const dataURL=off.toDataURL('image/jpeg',0.9); const fitted=new Image(); fitted.src=dataURL;
   return {dataURL, img:fitted};
 }
-async function addImage(mode){
-  const file=await pickImage(); if(!file) return;
+async function setBackground(){ const file=await pickImage(); if(!file) return;
   const tmp=new Image(); tmp.src=URL.createObjectURL(file);
   await new Promise(r=>{ tmp.onload=r; tmp.onerror=r; });
   const bg=fitImageToPaper(tmp); URL.revokeObjectURL(tmp.src);
-  if(mode==='append' || mode==='insert'){ Pages.list[0].bg=bg; } // 1枚固定：背景差し替えのみ
-  drawPaper(); redrawAll(); pushHistory();
+  Pages.cur().bg=bg; drawPaper(); redrawAll(); pushHistory();
 }
-$('#btnImgAppend').onclick=()=>addImage('append');
-$('#btnImgInsert').onclick=()=>addImage('insert');
-$('#btnSetBg_m').onclick=()=>addImage('append'); // moreパネルからも背景変更に統一
+document.getElementById('btnSetBg').onclick=()=>setBackground();
+document.getElementById('btnSetBg_m').onclick=()=>setBackground();
 
 /* ===== undo/redo ===== */
 const hist=[], redoStack=[];
-function snapshot(){ flushText(); return {pages:JSON.parse(JSON.stringify(Pages.list.map(p=>({strokes:p.strokes,textsHTML:p.textsHTML,bg:p.bg?{dataURL:p.bg.dataURL}:null})))), idx:0, grid:{on:gridOn,step:gridStepMM,color:gridColor}}; }
+function snapshot(){ flushText(); return {pages:JSON.parse(JSON.stringify(Pages.list.map(p=>({strokes:p.strokes,textsHTML:p.textsHTML,bg:p.bg?{dataURL:p.bg.dataURL}:null})))), idx:Pages.idx, grid:{on:gridOn,stepMM:gridStepMM,color:gridColor}}; }
 function pushHistory(){ hist.push(snapshot()); if(hist.length>40) hist.shift(); redoStack.length=0; updatePageIndicator(); }
 function restoreSnap(s){
   Pages.list=s.pages.map(pg=>{ const entry={strokes:pg.strokes||[],textsHTML:pg.textsHTML||'',bg:null}; if(pg.bg&&pg.dataURL){ const img=new Image(); img.src=pg.dataURL; entry.bg={dataURL:pg.dataURL,img}; } return entry; });
-  textLayer.innerHTML=Pages.list[0].textsHTML||''; updatePageIndicator(); drawPaper(); redrawAll();
+  Pages.idx=Math.max(0,Math.min(Pages.list.length-1,s.idx||0)); textLayer.innerHTML=Pages.cur().textsHTML||''; updatePageIndicator(); drawPaper(); redrawAll();
 }
 $('#btnUndo').onclick=()=>{ if(!hist.length) return; const cur=snapshot(); const prev=hist.pop(); redoStack.push(cur); restoreSnap(prev); };
 $('#btnRedo').onclick=()=>{ const nxt=redoStack.pop(); if(!nxt) return; hist.push(snapshot()); restoreSnap(nxt); };
 
-/* ===== Header rail: wheel/drag scroll（クリック殺し対策） ===== */
+/* ===== Header rail: wheel/drag scroll ===== */
 const rail = document.getElementById('railScroll');
 rail.addEventListener('wheel',(e)=>{ const useY=Math.abs(e.deltaY)>=Math.abs(e.deltaX); const d=useY?e.deltaY:e.deltaX;
   if(d!==0){ rail.scrollLeft+=d; e.preventDefault(); } },{passive:false});
-let railDown=false, railDrag=false, railStartX=0, railStartLeft=0;
-let railPointerId=null;
+let railDown=false, railDrag=false, railStartX=0, railStartLeft=0, railPointerId=null;
 const DRAG_THRESHOLD=8;
-rail.addEventListener('pointerdown',(e)=>{ if(e.button!==0 && e.pointerType==='mouse') return;
-  railDown=true; railDrag=false; railStartX=e.clientX; railStartLeft=rail.scrollLeft; railPointerId=e.pointerId; });
-rail.addEventListener('pointermove',(e)=>{ if(!railDown) return;
+let railJustDragged=false, railJustDraggedTimer=0;
+rail.addEventListener('pointerdown',(e)=>{
+  if(e.button!==0 && e.pointerType==='mouse') return;
+  railDown=true; railDrag=false; railStartX=e.clientX; railStartLeft=rail.scrollLeft; railPointerId=e.pointerId;
+});
+rail.addEventListener('pointermove',(e)=>{
+  if(!railDown) return;
   const dx=e.clientX-railStartX;
   if(!railDrag && Math.abs(dx)>DRAG_THRESHOLD){ railDrag=true; rail.classList.add('dragging'); rail.setPointerCapture?.(railPointerId); }
-  if(railDrag){ rail.scrollLeft=railStartLeft-dx; e.preventDefault(); } },{passive:false});
-function railEnd(e){ if(!railDown) return;
-  if(railDrag){ e.preventDefault(); }
-  railDown=false; railDrag=false; rail.classList.remove('dragging'); try{ rail.releasePointerCapture?.(railPointerId);}catch{} railPointerId=null; }
+  if(railDrag){ rail.scrollLeft=railStartLeft-dx; e.preventDefault(); }
+},{passive:false});
+function railEnd(e){
+  if(!railDown) return;
+  if(railDrag){
+    e.preventDefault();
+    railJustDragged=true;
+    clearTimeout(railJustDraggedTimer);
+    railJustDraggedTimer=setTimeout(()=>{ railJustDragged=false; },120);
+  }
+  railDown=false; railDrag=false; rail.classList.remove('dragging'); try{ rail.releasePointerCapture?.(railPointerId);}catch{} railPointerId=null;
+}
 rail.addEventListener('pointerup',railEnd,{passive:false});
 rail.addEventListener('pointercancel',railEnd,{passive:false});
 rail.addEventListener('pointerleave',railEnd,{passive:true});
+rail.addEventListener('click',(e)=>{
+  if(railJustDragged){ e.stopPropagation(); e.preventDefault(); railJustDragged=false; }
+}, true);
 
-/* ===== Header discoverability ===== */
-(function headerDiscoverability(){
-  const wrap = document.getElementById('railWrap'); const hint = document.getElementById('railHint');
-  function update(){ const can = rail.scrollWidth > rail.clientWidth + 1; wrap.classList.toggle('can-overflow', can);
-    const sc=rail.scrollLeft, max=rail.scrollWidth-rail.clientWidth-1; wrap.classList.toggle('at-start', sc<=0); wrap.classList.toggle('at-end', sc>=max); }
-  function maybe(){ let shown=false; try{ shown=sessionStorage.getItem('railHinted')==='1'; }catch{} if(shown) return;
-    if(wrap.classList.contains('can-overflow')){ hint.classList.add('show'); setTimeout(()=>{ hint.classList.remove('show'); try{ sessionStorage.setItem('railHinted','1'); }catch{} },2200); } }
-  const dismiss=()=>{ hint.classList.remove('show'); try{ sessionStorage.setItem('railHinted','1'); }catch{} };
-  rail.addEventListener('scroll',update,{passive:true});
-  rail.addEventListener('wheel',dismiss,{passive:true});
-  rail.addEventListener('pointerdown',dismiss,{passive:true});
-  window.addEventListener('resize',()=>{ update(); maybe(); });
-  update(); maybe();
-})();
-
-/* ===== Collapsible toolbar + movable handle（HF6Qそのまま） ===== */
+/* ===== Collapsible toolbar + movable handle（右ドック対応） ===== */
 const bodyEl=document.body, tbHandle=document.getElementById('tbHandle');
-function updateHandleIcon(){ const open=!isCollapsed(); tbHandle.innerHTML=open
-  ? '<svg viewBox="0 0 24 24"><path d="M5 15 L12 8 L19 15 Z"/></svg>'  /* ▲ */
-  : '<svg viewBox="0 0 24 24"><path d="M5 9 L12 16 L19 9 Z"/></svg>';  /* ▼ */ }
 function isCollapsed(){ return bodyEl.classList.contains('tb-collapsed'); }
-function applyHandleX(px){ const x=clamp(px,4, Math.max(4,innerWidth-40)); tbHandle.style.left=x+'px'; }
-function savedHandleX(){ try{ const v=localStorage.getItem('tbHandleX'); return (v==null?8:parseInt(v,10)||8); }catch{ return 8; } }
-function saveHandleX(px){ try{ localStorage.setItem('tbHandleX', String(px)); }catch{} }
-function getToolbarW(){
-  const b=getComputedStyle(document.body).getPropertyValue('--toolbar-w').trim();
-  const r=getComputedStyle(document.documentElement).getPropertyValue('--toolbar-w').trim();
-  const v=b||r||'0'; return parseInt(v,10)||0;
-}
+function isRightDock(){ return bodyEl.classList.contains('tb-right'); }
+function updateHandleIcon(){ const open=!isCollapsed(); tbHandle.innerHTML=open
+  ? '<svg viewBox="0 0 24 24"><path d="M5 15 L12 8 L19 15 Z"/></svg>'
+  : '<svg viewBox="0 0 24 24"><path d="M5 9 L12 16 L19 9 Z"/></svg>'; }
+function applyHandleX(px){ const x=Math.max(4, Math.min(Math.max(4,innerWidth-40), px)); tbHandle.style.left=x+'px'; }
+function savedHandleX(side){ try{ const k='tbHandleX_'+(side|| (isRightDock()?'R':'L')); const v=localStorage.getItem(k); return (v==null? (side==='R'? innerWidth-44 : 8) : parseInt(v,10)||8); }catch{ return 8; } }
+function saveHandleX(px){ try{ const k='tbHandleX_'+(isRightDock()?'R':'L'); localStorage.setItem(k, String(px)); }catch{} }
+function getLeftW(){ return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-left'))||0; }
+function getRightW(){ return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-right'))||0; }
+function setDock(side){ if(side==='right'){ bodyEl.classList.add('tb-right'); document.documentElement.style.setProperty('--toolbar-left','0px'); document.documentElement.style.setProperty('--toolbar-right','56px'); }
+  else { bodyEl.classList.remove('tb-right'); document.documentElement.style.setProperty('--toolbar-left','56px'); document.documentElement.style.setProperty('--toolbar-right','0px'); } }
+function handleCenterX(){ const x=parseInt(tbHandle.style.left||'8',10)||8; return x+18; } /* 36px幅の中心 */
+
 function toggleToolbar(mode='auto'){
-  const preW = getToolbarW();                 /* 開閉前のバー幅(px) */
+  const preLeft=getLeftW(), preRight=getRightW();
   const willCollapse=(mode==='auto')?!isCollapsed():(mode==='collapse');
+
+  if(!willCollapse && isCollapsed()){
+    /* 展開：ハンドルの位置でドック側を決める */
+    const side = (handleCenterX() > innerWidth/2) ? 'right' : 'left';
+    setDock(side);
+  }
   if(willCollapse){ bodyEl.classList.add('tb-collapsed'); tbHandle.setAttribute('aria-expanded','false'); }
   else            { bodyEl.classList.remove('tb-collapsed'); tbHandle.setAttribute('aria-expanded','true'); }
-  const postW = getToolbarW();                /* 開閉後のバー幅(px) */
-  const delta = preW - postW;                 /* 左余白の減少分だけ panX を加算 */
-  panX += delta;                              /* 画面上の紙位置を保持 */
+
+  const postLeft=getLeftW(), postRight=getRightW();
+  const delta=(preLeft+preRight) - (postLeft+postRight);
+  panX += delta; /* 紙の見かけ位置を維持 */
   updateViewportTransform();
   updateHandleIcon();
-  applyHandleX(savedHandleX());
   applyBars(); fitCanvases();
 }
 
-/* ハンドル：ドラッグ/TAP判定＋ドラッグ直後のclick抑止 */
 tbHandle.addEventListener('click', e=>{
-  if(justDragged){ justDragged=false; return; }  /* ドラッグ直後の誤クリック無視 */
+  if(justDragged){ justDragged=false; return; }
   toggleToolbar('auto');
 });
-function clamp(n,min,max){ return Math.max(min,Math.min(max,n)); }
 let draggingHandle=false, handleMoved=false, hx=0, startX=0, saveTick=0, justDragged=false;
 tbHandle.addEventListener('pointerdown', e=>{
-  draggingHandle=true; handleMoved=false; startX=e.clientX; hx=parseInt(tbHandle.style.left||savedHandleX(),10)||8;
+  draggingHandle=true; handleMoved=false; startX=e.clientX; hx=parseInt(tbHandle.style.left||(savedHandleX(isRightDock()?'R':'L')),10)||8;
   tbHandle.setPointerCapture?.(e.pointerId); e.preventDefault();
 },{passive:false});
 tbHandle.addEventListener('pointermove', e=>{
   if(!draggingHandle) return;
   const dx=e.clientX-startX;
   if(Math.abs(dx)>0){ handleMoved=true; }
-  const nx=clamp(hx+dx,4, Math.max(4,innerWidth-40));
+  const nx=Math.max(4, Math.min(Math.max(4,innerWidth-40), hx+dx));
   tbHandle.style.left=nx+'px';
   const now=performance.now(); if(now-saveTick>30){ saveHandleX(nx); saveTick=now; }
   e.preventDefault();
@@ -622,28 +613,37 @@ tbHandle.addEventListener('pointermove', e=>{
 function endHandle(e){
   if(!draggingHandle) return;
   draggingHandle=false;
-  const nx=parseInt(tbHandle.style.left||savedHandleX(),10)||8;
+  const nx=parseInt(tbHandle.style.left||(savedHandleX(isRightDock()?'R':'L')),10)||8;
   saveHandleX(nx);
   if(handleMoved){ justDragged=true; setTimeout(()=>{ justDragged=false; },0); e.preventDefault(); }
   try{tbHandle.releasePointerCapture?.(e.pointerId);}catch{}
 }
 tbHandle.addEventListener('pointerup', endHandle, {passive:false});
 tbHandle.addEventListener('pointercancel', endHandle, {passive:false});
-function clampHandle(){ const x=parseInt(tbHandle.style.left||savedHandleX(),10)||8; applyHandleX(x); }
+function clampHandle(){ const side=isRightDock()?'R':'L'; const x=parseInt(tbHandle.style.left||savedHandleX(side),10)||8; applyHandleX(x); }
+
+/* ===== zoom buttons ===== */
+function setZoom(z){ const z0=zoom, z1=Math.max(0.6,Math.min(3,z));
+  const vrW=viewport.clientWidth, vrH=viewport.clientHeight; const Cx=vrW/2, Cy=vrH/2;
+  const Ux=(Cx - panX)/z0, Uy=(Cy - panY)/z0; zoom=z1; panX = Cx - Ux*z1; panY = Cy - Uy*z1; updateViewportTransform();
+  $('#btnZoomReset').textContent=Math.round(zoom*100)+'%'; }
+$('#btnZoomIn').addEventListener('click', ()=>setZoom(zoom+0.1));
+$('#btnZoomOut').addEventListener('click', ()=>setZoom(zoom-0.1));
+$('#btnZoomReset').addEventListener('click', ()=>setZoom(1));
 
 /* ===== boot ===== */
 function boot(){
+  /* 既存の保存ドック側を復元（なければ左） */
+  const leftSaved = localStorage.getItem('tbHandleX_L');
+  const rightSaved = localStorage.getItem('tbHandleX_R');
+  setDock( rightSaved && (!leftSaved || parseInt(rightSaved,10) > innerWidth/2) ? 'right' : 'left' );
   updateViewportTransform(); fitCanvases(); setActiveTool('pen');
-  updateHandleIcon(); applyHandleX(savedHandleX());
+  updateHandleIcon(); applyHandleX(savedHandleX(isRightDock()?'R':'L'));
   panel.classList.remove('show'); $$('.tool[data-tool="settings"]').forEach(b=>b.classList.remove('active'));
   updatePageIndicator();
   pushHistory();
 }
 boot();
-
-/* ===== header bindings remain ===== */
-document.getElementById('btnImgAppend').onclick=()=>addImage('append');
-document.getElementById('btnImgInsert').onclick=()=>addImage('insert');
 </script>
 </body>
 </html>
